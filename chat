@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Messenger Viewer</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; }
+    .container { display: flex; height: 100vh; }
+    .sidebar { width: 30%; border-right: 1px solid #ccc; overflow-y: auto; padding: 10px; }
+    .chatbox { flex: 1; display: flex; flex-direction: column; }
+    .messages { flex: 1; padding: 10px; overflow-y: auto; }
+    .msg { margin: 5px 0; padding: 8px 12px; border-radius: 12px; max-width: 70%; word-wrap: break-word; }
+    .in { background: #eee; align-self: flex-start; }
+    .out { background: #4e8cff; color: white; align-self: flex-end; }
+    .msg.self { background: #a0aec0; color: white; align-self: flex-end; }
+    .chat-item { padding: 8px; cursor: pointer; border-bottom: 1px solid #eee; }
+    .chat-item:hover { background: #f9f9f9; }
+    .chat-item.red { background-color: #ffe5e5; } 
+    .page.red { border-left: 4px solid red; } 
+    .input-box { display: flex; padding: 10px; border-top: 1px solid #ccc; }
+    .input-box input { flex: 1; padding: 8px; }
+    .input-box button { margin-left: 5px; padding: 8px 12px; }
+    .temp { opacity: 0.6; font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="sidebar" id="conversation-list"><strong>Danh sách Page</strong></div>
+    <div class="chatbox">
+      <div class="messages" id="chat-messages"></div>
+      <div class="input-box">
+        <input type="text" id="reply-text" placeholder="Nhập tin nhắn...">
+        <button onclick="sendReply()">Gửi</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SHEET_ID = "1GqeNGZpbNKkpmsEtZ9CBZUHAQgbNEdbW47Oxdyie1Z8";
+    const API_KEY = "AIzaSyBw864zlCeP7ew9LRtEuJoiupO85HLpDF0";
+    const SHEET_NAME = "Sheet1";
+
+    const pages = {
+      "747951405067264": { name: "Smile Home" },
+      "767354809790281": { name: "Smile Home LC" },
+      "712112305324720": { name: "Smile Home Care" },
+      "567588529767561": { name: "Smile Home Lifestyle" }
+    };
+
+    const SEND_WEBHOOK = "https://n8n.cs-fulfill.com/webhook/send-message";
+
+    let allData = [];
+    let conversationHashes = {}; 
+    let currentPage = null, currentUser = null;
+
+    async function loadData() {
+      try {
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${SHEET_NAME}?key=${API_KEY}`;
+        const res = await fetch(url);
+        const json = await res.json();
+        if (!json.values) return;
+
+        const headers = json.values[0].map(h => h.trim().toLowerCase());
+        allData = json.values.slice(1).map(r => {
+          let o = {}; headers.forEach((h, i) => o[h] = r[i] || ""); return o;
+        });
+
+        renderPageList();
+        if (currentPage && currentUser) {
+          showConversation(currentPage, currentUser);
+        }
+      } catch (e) {
+        console.error("Load sheet error:", e);
+      }
+    }
+
+    function renderPageList() {
+      const convList = document.getElementById("conversation-list");
+      convList.innerHTML = "<strong>Danh sách Page</strong>";
+
+      const uniquePages = [...new Set(allData.map(m => m.page_id))];
+      uniquePages.forEach(pid => {
+        const pageDiv = document.createElement("div");
+        pageDiv.className = "page";
+        pageDiv.innerHTML = `<h4>${pages[pid]?.name || pid}</h4>`;
+
+        const conversations = [...new Set(allData
+          .filter(m => m.page_id === pid && m.user_id !== pid)
+          .map(m => `${m.page_id}_${m.user_id}`))]; // gom theo cặp page_id + user_id
+
+        conversations.forEach(key => {
+          const [p, uid] = key.split("_");
+          const convMsgs = allData.filter(m => m.page_id === p && (m.user_id === uid || m.user_id === p));
+          const hash = JSON.stringify(convMsgs);
+
+          const userDiv = document.createElement("div");
+          userDiv.className = "chat-item";
+          userDiv.textContent = `👤 User ${uid}`;
+          userDiv.onclick = () => {
+            showConversation(p, uid);
+            userDiv.classList.remove("red"); 
+            pageDiv.classList.remove("red");
+          };
+
+          if (conversationHashes[key] && conversationHashes[key] !== hash) {
+            userDiv.classList.add("red");
+            pageDiv.classList.add("red");
+          }
+          conversationHashes[key] = hash;
+
+          pageDiv.appendChild(userDiv);
+        });
+
+        convList.appendChild(pageDiv);
+      });
+    }
+
+    function showConversation(page_id, user_id) {
+      currentPage = page_id;
+      currentUser = user_id;
+
+      const msgs = allData.filter(m =>
+        m.page_id === page_id &&
+        (m.user_id === user_id || m.user_id === page_id) // lấy cả user và page rep
+      );
+
+      const chatBox = document.getElementById("chat-messages");
+      chatBox.innerHTML = `<h3>${pages[page_id]?.name || page_id} - User ${user_id}</h3>`;
+
+      msgs.forEach(m => {
+        const div = document.createElement("div");
+        if (m.user_id === m.page_id) div.className = "msg self";
+        else if (["out", "rep", "send"].includes((m.direction || "").toLowerCase())) div.className = "msg out";
+        else div.className = "msg in";
+        div.textContent = m.text || "(trống)";
+        chatBox.appendChild(div);
+      });
+    }
+
+    async function sendReply() {
+      const text = document.getElementById("reply-text").value.trim();
+      if (!text || !currentPage || !currentUser) {
+        alert("Chọn hội thoại và nhập tin nhắn!");
+        return;
+      }
+      const body = { page_id: currentPage, user_id: currentUser, text };
+      try {
+        await fetch(SEND_WEBHOOK, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        document.getElementById("reply-text").value = "";
+
+        const chatBox = document.getElementById("chat-messages");
+        const div = document.createElement("div");
+        div.className = "msg out temp";
+        div.textContent = text + " (đang gửi...)";
+        chatBox.appendChild(div);
+      } catch (e) {
+        console.error("Send error:", e);
+        alert("❌ Không gửi được tin");
+      }
+    }
+
+    loadData();
+    setInterval(loadData, 30 * 1000);
+  </script>
+</body>
+</html>
