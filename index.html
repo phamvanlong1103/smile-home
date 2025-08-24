@@ -16,8 +16,8 @@
     .msg.self { background: #a0aec0; color: white; align-self: flex-end; }
     .chat-item { padding: 8px; cursor: pointer; border-bottom: 1px solid #eee; }
     .chat-item:hover { background: #f9f9f9; }
-    .chat-item.red { background-color: #ffe5e5; } 
-    .page.red { border-left: 4px solid red; } 
+    .chat-item.red { background-color: #ffe5e5; } /* hội thoại có tin mới */
+    .page.red { border-left: 4px solid red; }     /* page có tin mới */
     .input-box { display: flex; padding: 10px; border-top: 1px solid #ccc; }
     .input-box input { flex: 1; padding: 8px; }
     .input-box button { margin-left: 5px; padding: 8px 12px; }
@@ -51,9 +51,10 @@
     const SEND_WEBHOOK = "https://n8n.cs-fulfill.com/webhook/send-message";
 
     let allData = [];
-    let conversationHashes = {}; 
+    let conversationHashes = {}; // lưu hash để phát hiện thay đổi
     let currentPage = null, currentUser = null;
 
+    // Load dữ liệu từ Google Sheet
     async function loadData() {
       try {
         const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${SHEET_NAME}?key=${API_KEY}`;
@@ -75,6 +76,7 @@
       }
     }
 
+    // Render danh sách page và các user hội thoại
     function renderPageList() {
       const convList = document.getElementById("conversation-list");
       convList.innerHTML = "<strong>Danh sách Page</strong>";
@@ -87,7 +89,7 @@
 
         const conversations = [...new Set(allData
           .filter(m => m.page_id === pid && m.user_id !== pid)
-          .map(m => `${m.page_id}_${m.user_id}`))]; // gom theo cặp page_id + user_id
+          .map(m => `${m.page_id}_${m.user_id}`))]; // gom theo page_id + user_id
 
         conversations.forEach(key => {
           const [p, uid] = key.split("_");
@@ -116,13 +118,14 @@
       });
     }
 
+    // Hiển thị hội thoại chi tiết
     function showConversation(page_id, user_id) {
       currentPage = page_id;
       currentUser = user_id;
 
       const msgs = allData.filter(m =>
         m.page_id === page_id &&
-        (m.user_id === user_id || m.user_id === page_id) // lấy cả user và page rep
+        (m.user_id === user_id || m.user_id === page_id)
       );
 
       const chatBox = document.getElementById("chat-messages");
@@ -130,14 +133,23 @@
 
       msgs.forEach(m => {
         const div = document.createElement("div");
-        if (m.user_id === m.page_id) div.className = "msg self";
-        else if (["out", "rep", "send"].includes((m.direction || "").toLowerCase())) div.className = "msg out";
-        else div.className = "msg in";
+
+        // phân biệt theo direction
+        const direction = (m.direction || "").toLowerCase();
+        if (direction === "send") {
+          div.className = "msg out"; // page gửi
+        } else if (direction === "rep") {
+          div.className = "msg self"; // page rep
+        } else {
+          div.className = "msg in"; // khách gửi
+        }
+
         div.textContent = m.text || "(trống)";
         chatBox.appendChild(div);
       });
     }
 
+    // Gửi tin nhắn
     async function sendReply() {
       const text = document.getElementById("reply-text").value.trim();
       if (!text || !currentPage || !currentUser) {
@@ -153,6 +165,7 @@
         });
         document.getElementById("reply-text").value = "";
 
+        // append tạm tin nhắn
         const chatBox = document.getElementById("chat-messages");
         const div = document.createElement("div");
         div.className = "msg out temp";
@@ -164,6 +177,7 @@
       }
     }
 
+    // Load ban đầu và refresh mỗi 30s
     loadData();
     setInterval(loadData, 30 * 1000);
   </script>
