@@ -16,8 +16,8 @@
     .msg.self { background: #a0aec0; color: white; align-self: flex-end; }
     .chat-item { padding: 8px; cursor: pointer; border-bottom: 1px solid #eee; }
     .chat-item:hover { background: #f9f9f9; }
-    .chat-item.red { background-color: #ffe5e5; } /* hội thoại có tin mới */
-    .page.red { border-left: 4px solid red; }     /* page có tin mới */
+    .chat-item.red { background-color: #ffe5e5; } 
+    .page.red { border-left: 4px solid red; } 
     .input-box { display: flex; padding: 10px; border-top: 1px solid #ccc; }
     .input-box input { flex: 1; padding: 8px; }
     .input-box button { margin-left: 5px; padding: 8px 12px; }
@@ -51,10 +51,9 @@
     const SEND_WEBHOOK = "https://n8n.cs-fulfill.com/webhook/send-message";
 
     let allData = [];
-    let conversationHashes = {}; // lưu hash để phát hiện thay đổi
+    let conversationHashes = {}; 
     let currentPage = null, currentUser = null;
 
-    // Load dữ liệu từ Google Sheet
     async function loadData() {
       try {
         const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${SHEET_NAME}?key=${API_KEY}`;
@@ -64,7 +63,12 @@
 
         const headers = json.values[0].map(h => h.trim().toLowerCase());
         allData = json.values.slice(1).map(r => {
-          let o = {}; headers.forEach((h, i) => o[h] = r[i] || ""); return o;
+          let o = {}; 
+          headers.forEach((h, i) => o[h] = r[i] || "");
+
+          // ✅ Thêm conversation_id để gom hội thoại đúng
+          o.conversation_id = o.page_id + "_" + (o.user_id !== o.page_id ? o.user_id : o.msg_id);
+          return o;
         });
 
         renderPageList();
@@ -76,7 +80,6 @@
       }
     }
 
-    // Render danh sách page và các user hội thoại
     function renderPageList() {
       const convList = document.getElementById("conversation-list");
       convList.innerHTML = "<strong>Danh sách Page</strong>";
@@ -87,13 +90,14 @@
         pageDiv.className = "page";
         pageDiv.innerHTML = `<h4>${pages[pid]?.name || pid}</h4>`;
 
+        // ✅ gom theo conversation_id thay vì user_id
         const conversations = [...new Set(allData
           .filter(m => m.page_id === pid && m.user_id !== pid)
-          .map(m => `${m.page_id}_${m.user_id}`))]; // gom theo page_id + user_id
+          .map(m => m.conversation_id))];
 
-        conversations.forEach(key => {
-          const [p, uid] = key.split("_");
-          const convMsgs = allData.filter(m => m.page_id === p && (m.user_id === uid || m.user_id === p));
+        conversations.forEach(convId => {
+          const [p, uid] = convId.split("_");
+          const convMsgs = allData.filter(m => m.conversation_id === convId);
           const hash = JSON.stringify(convMsgs);
 
           const userDiv = document.createElement("div");
@@ -105,11 +109,11 @@
             pageDiv.classList.remove("red");
           };
 
-          if (conversationHashes[key] && conversationHashes[key] !== hash) {
+          if (conversationHashes[convId] && conversationHashes[convId] !== hash) {
             userDiv.classList.add("red");
             pageDiv.classList.add("red");
           }
-          conversationHashes[key] = hash;
+          conversationHashes[convId] = hash;
 
           pageDiv.appendChild(userDiv);
         });
@@ -118,38 +122,26 @@
       });
     }
 
-    // Hiển thị hội thoại chi tiết
     function showConversation(page_id, user_id) {
       currentPage = page_id;
       currentUser = user_id;
 
-      const msgs = allData.filter(m =>
-        m.page_id === page_id &&
-        (m.user_id === user_id || m.user_id === page_id)
-      );
+      const convId = page_id + "_" + user_id;
+      const msgs = allData.filter(m => m.conversation_id === convId);
 
       const chatBox = document.getElementById("chat-messages");
       chatBox.innerHTML = `<h3>${pages[page_id]?.name || page_id} - User ${user_id}</h3>`;
 
       msgs.forEach(m => {
         const div = document.createElement("div");
-
-        // phân biệt theo direction
-        const direction = (m.direction || "").toLowerCase();
-        if (direction === "send") {
-          div.className = "msg out"; // page gửi
-        } else if (direction === "rep") {
-          div.className = "msg self"; // page rep
-        } else {
-          div.className = "msg in"; // khách gửi
-        }
-
+        if (m.user_id === m.page_id) div.className = "msg self";
+        else if (["out", "rep", "send"].includes((m.direction || "").toLowerCase())) div.className = "msg out";
+        else div.className = "msg in";
         div.textContent = m.text || "(trống)";
         chatBox.appendChild(div);
       });
     }
 
-    // Gửi tin nhắn
     async function sendReply() {
       const text = document.getElementById("reply-text").value.trim();
       if (!text || !currentPage || !currentUser) {
@@ -165,7 +157,6 @@
         });
         document.getElementById("reply-text").value = "";
 
-        // append tạm tin nhắn
         const chatBox = document.getElementById("chat-messages");
         const div = document.createElement("div");
         div.className = "msg out temp";
@@ -177,7 +168,6 @@
       }
     }
 
-    // Load ban đầu và refresh mỗi 30s
     loadData();
     setInterval(loadData, 30 * 1000);
   </script>
